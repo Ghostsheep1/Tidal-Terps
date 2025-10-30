@@ -2,16 +2,12 @@
  * ENES100 – WATER Mission – Mecanum OTV
  * University of Maryland – Tidal Terps
  *
- * - ENES100 Vision System (Wi-Fi pins set below)
+ * - ENES100 Vision System integration (Wi-Fi pins set below)
  * - Pose wrapper with last-good caching (VisionPose)
  * - Demo forward + ~90° turns
  * - Obstacle avoidance with HC-SR04 (air ultrasonic)
  * - Simple P-control waypoint nav (mecanum)
- * - WATER mission: depth (mm) + water type reporting (stubbed analogs)
- *
- * TODOs for your bot:
- *  - Set MARKER_ID, ROOM_NUMBER, arena targets, and motor pin mapping
- *  - Calibrate depth/turbidity sensors or replace stubs with your real sensors
+ * - WATER mission: depth (mm) + water type reporting (stub analogs)
  */
 
 #include <Arduino.h>
@@ -24,8 +20,8 @@ static const byte  TEAM_TYPE   = WATER;      // Mission type
 static const int   MARKER_ID   = 3;          // <-- your ArUco ID
 static const int   ROOM_NUMBER = 1120;       // 1120 or 1116
 
-// Use allowed pins for your board. Avoid PWM pins used by motors.
-// CHANGED: moved Wi-Fi to 10/11 to avoid conflict with motor PWM on 9.
+// Use allowed pins for your board (see ENES100 docs).
+// Kept off the motor PWM pins to avoid conflicts.
 static const int WIFI_TX_PIN = 10;  // Arduino -> Wi-Fi RX
 static const int WIFI_RX_PIN = 11;  // Arduino <- Wi-Fi TX
 
@@ -38,16 +34,16 @@ const uint8_t BR_PWM = 9;   // Back-right
 
 // ================= OBSTACLE SENSOR: HC-SR04 (TRIG/ECHO) =================
 const uint8_t HC_TRIG_PIN = 7;   // digital output
-const uint8_t HC_ECHO_PIN = 4;   // digital input (use interrupt-capable pin if you like)
+const uint8_t HC_ECHO_PIN = 4;   // digital input
 
 // Obstacle thresholds (meters) — tune to your course
-float g_obstBaselineM         = NAN;  // measured at boot
-float g_obstTriggerDeltaM     = 0.15; // trigger if < (baseline - delta)
-float g_obstMinTriggerM       = 0.35; // or absolute: anything closer than this is an obstacle
-unsigned long g_echoTimeoutUs = 25000UL; // ~4.3 m range timeout
+float g_obstBaselineM         = NAN;   // measured at boot
+float g_obstTriggerDeltaM     = 0.15;  // trigger if < (baseline - delta)
+float g_obstMinTriggerM       = 0.35;  // or absolute: anything closer than this is an obstacle
+unsigned long g_echoTimeoutUs = 25000UL; // ~4.3 m max
 
 // ================= WATER MISSION SENSORS (STUB ANALOGS) =================
-// Replace with your real water sensors (these are not the HC-SR04)
+// Replace with your real water sensors (these are NOT the HC-SR04)
 const uint8_t DEPTH_SENSOR_PIN = A1; // pressure sensor analog (example)
 const uint8_t TURB_SENSOR_PIN  = A2; // turbidity analog (example)
 
@@ -58,7 +54,7 @@ int   g_turbidityThresholdCounts= 500;   // calibrate!
 // ================= NAV / CONTROL TUNING =================
 static const float    kMaxCmd     = 1.0f;   // limit |vx|,|vy|,|omega|
 static const float    kVTransGain = 0.7f;   // P gain
-static const uint16_t kLoopDtMs   = 20;     // loop period
+static const uint16_t kLoopDtMs   = 20;     // loop period (ms)
 static const float    kArriveTol  = 0.05f;  // meters
 
 // ================= ARENA TARGETS (EDIT FOR YOUR FIELD) =================
@@ -86,27 +82,21 @@ static inline float hypot2(float dx, float dy) { return sqrtf(dx*dx + dy*dy); }
 static inline float normalizeAngle(float a) { while (a < 0) a += 2*PI; while (a >= 2*PI) a -= 2*PI; return a; }
 
 // ================= POSE WRAPPER (VISION + CACHING) =================
-struct VisionPose { float x, y, theta; bool visible; };
+// *** IMPORTANT: This struct is defined BEFORE any function that uses it ***
+struct VisionPose {
+  float x;
+  float y;
+  float theta;
+  bool  visible;
+};
+
+// Cache last good pose to ride out brief occlusions
 static VisionPose g_lastGoodPose = {NAN, NAN, 0.0f, false};
 
-static VisionPose readPoseVision() {
-  VisionPose p;
-  p.x       = Enes100.getX();
-  p.y       = Enes100.getY();
-  p.theta   = Enes100.getTheta();
-  p.visible = Enes100.isVisible();
-
-  if (p.visible && isfinite(p.x) && isfinite(p.y)) {
-    g_lastGoodPose = p;
-    return p;
-  }
-  return g_lastGoodPose; // may be invalid until first lock
-}
-
-static bool arrived(float tx, float ty, const VisionPose& p) {
-  if (!isfinite(p.x) || !isfinite(p.y)) return false;
-  return hypot2(tx - p.x, ty - p.y) <= kArriveTol;
-}
+// ========== Forward declarations that use VisionPose (now valid) ==========
+static VisionPose readPoseVision();
+static bool arrived(float tx, float ty, const VisionPose& p);
+static void translateToward(float x, float y, const VisionPose& p);
 
 // ================= LOGGING HELPERS =================
 static void missionPrintln(const String& msg) { Enes100.println(msg); }
@@ -146,7 +136,7 @@ static float hcsr04_readDistanceM_once() {
   delayMicroseconds(10);
   digitalWrite(HC_TRIG_PIN, LOW);
 
-  // Measure echo pulse width (microseconds). Timeout limits max distance.
+  // Measure echo pulse width (us). Timeout limits max distance.
   unsigned long dur = pulseIn(HC_ECHO_PIN, HIGH, g_echoTimeoutUs);
   if (dur == 0UL) return NAN; // timeout / out of range
 
@@ -166,7 +156,7 @@ static float hcsr04_readDistanceM(uint8_t samples = 3) {
     delay(10);
   }
   if (n == 0) return NAN;
-  // simple insertion sort for small n
+  // insertion sort for small n
   for (uint8_t i = 1; i < n; ++i) {
     float key = vals[i]; int j = i - 1;
     while (j >= 0 && vals[j] > key) { vals[j+1] = vals[j]; j--; }
@@ -178,8 +168,7 @@ static float hcsr04_readDistanceM(uint8_t samples = 3) {
 // ================== OBSTACLE DETECT / CAL ==================
 static bool obstacleDetected() {
   float d = hcsr04_readDistanceM();
-  if (!isfinite(d)) return false; // no reading -> don't panic
-  // absolute trigger OR relative vs baseline
+  if (!isfinite(d)) return false; // no reading -> don't trigger
   bool absHit = (d <= g_obstMinTriggerM);
   bool relHit = (isfinite(g_obstBaselineM) && d < (g_obstBaselineM - g_obstTriggerDeltaM));
   return absHit || relHit;
@@ -245,9 +234,25 @@ static void sendWaterResults() {
   missionPrintln(String("Mission: DEPTH=") + depth_mm + " mm");
 }
 
-// ================== DEMOS + NAV ==================
-static void demoForwardStep() { driveMecanum(0.6f, 0.0f, 0.0f); }
-static void demoTurn90Step()  { driveMecanum(0.0f, 0.0f, 0.6f); }
+// ================== POSE FUNCTIONS (after struct!) ==================
+static VisionPose readPoseVision() {
+  VisionPose p;
+  p.x       = Enes100.getX();
+  p.y       = Enes100.getY();
+  p.theta   = Enes100.getTheta();
+  p.visible = Enes100.isVisible();
+
+  if (p.visible && isfinite(p.x) && isfinite(p.y)) {
+    g_lastGoodPose = p;
+    return p;
+  }
+  return g_lastGoodPose; // may be invalid until first lock
+}
+
+static bool arrived(float tx, float ty, const VisionPose& p) {
+  if (!isfinite(p.x) || !isfinite(p.y)) return false;
+  return hypot2(tx - p.x, ty - p.y) <= kArriveTol;
+}
 
 static void translateToward(float x, float y, const VisionPose& p) {
   if (!isfinite(p.x) || !isfinite(p.y)) { stopMotors(); return; }
@@ -257,6 +262,10 @@ static void translateToward(float x, float y, const VisionPose& p) {
   if (mag > kMaxCmd) { vx *= (kMaxCmd/mag); vy *= (kMaxCmd/mag); }
   driveMecanum(vx, vy, 0.0f);
 }
+
+// ================== DEMOS ==================
+static void demoForwardStep() { driveMecanum(0.6f, 0.0f, 0.0f); }
+static void demoTurn90Step()  { driveMecanum(0.0f, 0.0f, 0.6f); }
 
 // ================== SETUP / LOOP ==================
 static unsigned long t0 = 0;
@@ -276,7 +285,7 @@ void setup() {
   pinMode(DEPTH_SENSOR_PIN, INPUT);
   pinMode(TURB_SENSOR_PIN, INPUT);
 
-  // ENES100 connect (blocks until connected)
+  // ENES100 connect (blocks until Vision connected)
   Enes100.begin(TEAM_NAME, TEAM_TYPE, MARKER_ID, ROOM_NUMBER, WIFI_TX_PIN, WIFI_RX_PIN);
   missionPrintln("ENES100 connected. WATER mission start.");
 
@@ -294,7 +303,7 @@ void loop() {
     } break;
 
     case RunState::CALIBRATE_SENSORS: {
-      calibrateHC_SR04();         // baseline distance in current environment
+      calibrateHC_SR04();         // obstacle baseline
       calibrateDepthZero();       // water depth zero
       calibrateTurbidity();       // water turbidity threshold
       t0 = millis();
