@@ -263,6 +263,17 @@ static void translateToward(float x, float y, const VisionPose& p) {
   driveMecanum(vx, vy, 0.0f);
 }
 
+#define PUMP_PIN 6   // choose any free digital pin
+void startPump() {
+    digitalWrite(PUMP_PIN, HIGH);
+    missionPrintln("Pump ON: collecting sample");
+}
+
+void stopPump() {
+    digitalWrite(PUMP_PIN, LOW);
+    missionPrintln("Pump OFF: sample collection complete");
+}
+
 // ================== DEMOS ==================
 static void demoForwardStep() { driveMecanum(0.6f, 0.0f, 0.0f); }
 static void demoTurn90Step()  { driveMecanum(0.0f, 0.0f, 0.6f); }
@@ -272,6 +283,10 @@ static unsigned long t0 = 0;
 static uint8_t turnCount = 0;
 
 void setup() {
+  
+  pinMode(PUMP_PIN, OUTPUT);
+  digitalWrite(PUMP_PIN, LOW);  // pump OFF at start
+
   Serial.begin(9600);
 
   pinMode(FL_PWM, OUTPUT);
