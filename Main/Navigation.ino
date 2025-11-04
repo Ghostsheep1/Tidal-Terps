@@ -1,7 +1,7 @@
-#include <ENES100.h>
-#include <math.h>
+// ===== SIMPLEST M5 NAV CODE =====
+// Motors ON → delay → stop → delay → motors ON → stop
+// No sensing, no feedback. Pure timing.
 
-// Motor pins
 #define MOTOR_FL_1 2
 #define MOTOR_FL_2 3
 #define MOTOR_FR_1 4
@@ -12,61 +12,29 @@
 #define MOTOR_BR_2 9
 
 void setup() {
-  Serial.begin(9600);
-
-  Enes100.begin("TidalTerp", WATER, 534, 1116, 8, 9);
-
-  while (!Enes100.isConnected()) {
-    Enes100.println("Waiting for connection...");
-    delay(1000);
+  // Initialize motor pins
+  for (int pin = 2; pin <= 9; pin++) {
+    pinMode(pin, OUTPUT);
   }
 
-  Enes100.println("Connected – Begin Mission!");
-
-  // Initialize motors
-  for (int pin = 2; pin <= 9; pin++) pinMode(pin, OUTPUT);
+  delay(2000);   // Small pause before starting
 }
 
 void loop() {
 
-  float x = Enes100.getX();
-  float y = Enes100.getY();
-  float theta = Enes100.getTheta();
-
-  // Example coordinates — replace with mission site & limbo positions
-  float missionX = 2.0;
-  float missionY = 1.5;
-  float limboX = 3.2;
-  float limboY = 1.5;
-
-  // Move to mission
-  moveTo(missionX, missionY);
-
-  stopMotors();
-  delay(2000);
-
-  // Move to limbo
-  moveTo(limboX, limboY);
-
-  stopMotors();
-  Enes100.println("Navigation Complete!");
-
-  while (true); // stop forever
-}
-
-void moveTo(float targetX, float targetY) {
-
-  float startX = Enes100.getX();
-  float startY = Enes100.getY();
-
-  float distance = sqrt(pow(targetX - startX, 2) + pow(targetY - startY, 2));
-
-  Enes100.println("Moving to target...");
-
-  // Basic forward only — no turning correction
+  // ========= Go to mission site =========
   driveForward();
+  delay(4000);     // adjust time until it reaches mission site
+  stopMotors();
 
-  delay(distance * 1000);   // approx. 1 sec per meter
+  delay(2000);     // pause
+
+  // ========= Go to limbo area =========
+  driveForward();
+  delay(4000);     // adjust time as needed
+  stopMotors();
+
+  while (true);    // done forever
 }
 
 void driveForward() {
@@ -81,5 +49,7 @@ void driveForward() {
 }
 
 void stopMotors() {
-  for (int pin = 2; pin <= 9; pin++) digitalWrite(pin, LOW);
+  for (int pin = 2; pin <= 9; pin++) {
+    digitalWrite(pin, LOW);
+  }
 }
