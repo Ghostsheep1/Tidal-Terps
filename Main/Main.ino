@@ -283,7 +283,30 @@ static unsigned long t0 = 0;
 static uint8_t turnCount = 0;
 
 void setup() {
-  
+  const char* TEAM_NAME   = "TidalTerp";     
+  const byte TEAM_TYPE   = WATER;           
+  const int MARKER_ID   = 534;               
+  const int ROOM_NUMBER = 1116;            
+
+// WiFi module pin connections
+  const int WIFI_TX_PIN   = 8;
+  const int WIFI_RX_PIN   = 9;
+
+  Enes100.begin(TEAM_NAME, TEAM_TYPE, MARKER_ID, ROOM_NUMBER, WIFI_TX_PIN, WIFI_RX_PIN);
+
+  // Confirm initialization
+  Enes100.println("ENES100 WATER Mission Initialized");
+
+  // Wait for connection to the overhead vision system
+  while (!Enes100.isConnected()) {
+    Enes100.println("Waiting for connection");
+    delay(1000);
+  }
+
+  Enes100.println("Connected to overhead vision system");
+  Enes100.println("Starting mission");
+
+
   pinMode(PUMP_PIN, OUTPUT);
   digitalWrite(PUMP_PIN, LOW);  // pump OFF at start
 
