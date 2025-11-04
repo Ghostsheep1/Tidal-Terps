@@ -1,175 +1,188 @@
 /*******************************************************************
- ENES100 + Tank Navigation Demo
- (No obstacles — Navigation only)
-
- Demonstrates basic navigation from:
-   - Random starting pose 
-   - To mission site (X_MS, Y_MS)
-   - Then to pre-limbo waypoint (X_LIM, Y_LIM)
-
- Requires:
-   Tank.h
-   Enes100.h
-
- Change:
-   - TEAM_NAME
-   - MATERIAL
-   - ARUCO_ID
-   - Mission & Limbo coordinates
+ ENES100 + Tank Demo
+ Navigation: Random Start → Mission Site → Pre-Limbo Waypoint
+ Uses ALL Tank movement + sensor functions
 *******************************************************************/
 
 #include "Tank.h"
 #include "Enes100.h"
 
-// ======== USER-UPDATE VALUES ========
-const char TEAM_NAME[] = "TEAM_NAME_HERE";
-const int ARUCO_ID = 0;   // <- Insert yours
-const Enes100::Material MATERIAL = Enes100::Material::WOOD; // or FOAM, METAL, etc.
+// ------------------------
+// UPDATE THESE
+// ------------------------
+const char TEAM_NAME[] = "TEAM_NAME";
+const int ARUCO_ID = 0;
+const Enes100::Material MATERIAL = Enes100::Material::WOOD;
 
-// Mission site location (example only)
-float X_MS = 1.0;     // meters
-float Y_MS = 2.5;     // meters
+// Example coordinates — REPLACE WITH REAL ONES
+float X_MS  = 1.0;   // mission site
+float Y_MS  = 2.0;
+float X_LIM = 3.0;   // before limbo/log
+float Y_LIM = 3.2;
 
-// Pre-limbo point (just before log/limbo)
-float X_LIM = 3.0;    // meters
-float Y_LIM = 3.0;    // meters
-
-// Drive parameters
-float forwardPWM = 150;
-float turnPWM    = 150;
 float posX, posY, heading;
 
-// ======= Simple helper functions =======
+// motion settings
+int fwdPWM  = 140;
+int turnPWM = 150;
 
-// Stop
-void stopMotion() {
+// --------------------------------------------
+// Basic helpers
+// --------------------------------------------
+
+void stopAll() {
   Tank.turnOffMotors();
 }
 
-// Drive straight forward
-void driveForward(int pwm) {
-  Tank.setLeftMotorPWM(pwm);
-  Tank.setRightMotorPWM(pwm);
+// drive forward
+void driveForward() {
+  Tank.setLeftMotorPWM(fwdPWM);
+  Tank.setRightMotorPWM(fwdPWM);
 }
 
-// Turn left (in place)
-void turnLeft(int pwm) {
-  Tank.setLeftMotorPWM(-pwm);
-  Tank.setRightMotorPWM(pwm);
+// drive backward
+void driveBackward() {
+  Tank.setLeftMotorPWM(-fwdPWM);
+  Tank.setRightMotorPWM(-fwdPWM);
 }
 
-// Turn right (in place)
-void turnRight(int pwm) {
-  Tank.setLeftMotorPWM(pwm);
-  Tank.setRightMotorPWM(-pwm);
+// turn in place left
+void rotateLeft() {
+  Tank.setLeftMotorPWM(-turnPWM);
+  Tank.setRightMotorPWM(turnPWM);
 }
 
-// Update local pose
+// turn in place right
+void rotateRight() {
+  Tank.setLeftMotorPWM(turnPWM);
+  Tank.setRightMotorPWM(-turnPWM);
+}
+
+// directly set individual motor (1-4)
+void motorExample() {
+  Tank.setMotorPWM(1, 150);   // forward motor 1
+  Tank.setMotorPWM(2, 150);   // forward motor 2
+  delay(300);
+  Tank.turnOffMotors();
+}
+
+// update pose from vision
 void updatePose() {
-  posX     = Enes100.getX();
-  posY     = Enes100.getY();
-  heading  = Enes100.getTheta();   // radians
+  posX    = Enes100.getX();
+  posY    = Enes100.getY();
+  heading = Enes100.getTheta();
 }
 
-// Convert angle to ±π
-float wrapAngle(float a){
-  while(a >  3.14159) a -= 2*3.14159;
-  while(a < -3.14159) a += 2*3.14159;
+// wrap angle
+float wrapAngle(float a) {
+  while (a > 3.14159)  a -= 2 * 3.14159;
+  while (a < -3.14159) a += 2 * 3.14159;
   return a;
 }
 
-// Rotate to a target angle (in radians)
+// turn to angle target
 void rotateTo(float targetTheta) {
   updatePose();
   float error = wrapAngle(targetTheta - heading);
 
-  while (abs(error) > 0.1) {
-    if (error > 0) turnLeft(turnPWM);
-    else           turnRight(turnPWM);
+  while (abs(error) > 0.12) {
+    if (error > 0) rotateLeft();
+    else           rotateRight();
 
     delay(50);
     updatePose();
     error = wrapAngle(targetTheta - heading);
   }
 
-  stopMotion();
+  stopAll();
 }
 
-// Drive to a coordinate
+// move to coordinate
 void goTo(float targetX, float targetY) {
-
   updatePose();
 
   float dx = targetX - posX;
   float dy = targetY - posY;
-  float distance = sqrt(dx*dx + dy*dy);
+  float dist = sqrt(dx*dx + dy*dy);
   float targetHeading = atan2(dy, dx);
 
-  // Step 1: Face target
+  // face target
   rotateTo(targetHeading);
 
-  // Step 2: Drive straight
-  while (distance > 0.10) {  // Stop within 10 cm
-    driveForward(forwardPWM);
+  // drive forward
+  while (dist > 0.12) {
+    driveForward();
     delay(80);
 
     updatePose();
     dx = targetX - posX;
     dy = targetY - posY;
-    distance = sqrt(dx*dx + dy*dy);
+    dist = sqrt(dx*dx + dy*dy);
   }
-
-  stopMotion();
+  stopAll();
 }
 
-// ======= MAIN =======
-
+// -----------------------------------------------------
+// Setup
+// -----------------------------------------------------
 void setup() {
   Serial.begin(9600);
   Tank.begin();
 
-  // Connect to vision system
-  // ENES100.begin(name, material, arucoID, teamNumber, TX, RX)
   Enes100.begin(TEAM_NAME, MATERIAL, ARUCO_ID, 1116, 52, 50);
   delay(300);
 
-  Enes100.println("Navigation demo start");
+  Enes100.println("START Navigation");
+
+  // read sensors: demo usage
+  float dist1 = Tank.readDistanceSensor(1);
+  int ir = Tank.readIrSensor(1);
+  int bump = Tank.readBumpSensor(1);
+
+  Enes100.print("Ultrasonic: ");
+  Enes100.println(dist1);
+
+  Enes100.print("IR1: ");
+  Enes100.println(ir);
+
+  Enes100.print("Bump front: ");
+  Enes100.println(bump);
+
+  // example: control individual motors
+  motorExample();
 }
 
+// -----------------------------------------------------
+// Main Loop
+// -----------------------------------------------------
 void loop() {
 
-  // Get initial pose
   updatePose();
-  Enes100.print("Starting pose: (");
+  Enes100.print("Start at (");
   Enes100.print(posX);
-  Enes100.print(", ");
+  Enes100.print(",");
   Enes100.print(posY);
-  Enes100.print(") Heading: ");
-  Enes100.println(heading);
+  Enes100.println(")");
 
-  /***********************************************
-    STEP 1 — Go to Mission Site
-  ***********************************************/
-  Enes100.println("Heading to Mission Site...");
+  //-------------------------------------------
+  // Go to Mission Site
+  //-------------------------------------------
+  Enes100.println("Going to mission site...");
   goTo(X_MS, Y_MS);
 
-  Enes100.println("Arrived at Mission Site");
+  Enes100.println("At mission site.");
+  delay(800);
 
-  delay(1000);
-
-  /***********************************************
-    STEP 2 — Go to Pre-Limbo Point
-  ***********************************************/
-  Enes100.println("Heading to Pre-Limbo Waypoint...");
+  //-------------------------------------------
+  // Go to Pre-Limbo Point
+  //-------------------------------------------
+  Enes100.println("Going to limbo start...");
   goTo(X_LIM, Y_LIM);
 
-  Enes100.println("Arrived at Pre-Limbo Waypoint");
+  Enes100.println("Arrived at limbo staging.");
 
-  /***********************************************
-    DONE
-  ***********************************************/
-  stopMotion();
-  Enes100.println("Navigation complete — Waiting.");
+  stopAll();
 
-  while(true);   // Hold state
+  // hold nicely
+  while (true);
 }
