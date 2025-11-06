@@ -1,188 +1,234 @@
-/*******************************************************************
- ENES100 + Tank Demo
- Navigation: Random Start → Mission Site → Pre-Limbo Waypoint
- Uses ALL Tank movement + sensor functions
-*******************************************************************/
+/*
+ * ENES100 – MS5 BASIC DEMO
+ * SUBTASKS SUPPORTED:
+ *  #2 Forward Locomotion
+ *  #3 Turning (90° x3)
+ *  #4 Wireless Receive
+ *  #5 Wireless Transmit
+ *
+ *  ======== EDIT THESE IF YOU KNOW THEM ========
+ */
 
-#include "Tank.h"
+#include <Arduino.h>
 #include "Enes100.h"
 
-// ------------------------
-// UPDATE THESE
-// ------------------------
-const char TEAM_NAME[] = "TEAM_NAME";
-const int ARUCO_ID = 0;
-const Enes100::Material MATERIAL = Enes100::Material::WOOD;
+// ===================================================
+// ✅ REQUIRED ENES100 SETTINGS  (EDIT THESE)
+// ===================================================
+const char* TEAM_NAME   = "Tidal Terps";
+const byte  TEAM_TYPE   = WATER;
+const int   MARKER_ID   = 0;                  // <-- EDIT
+const int   ROOM_NUMBER = 1116;
 
-// Example coordinates — REPLACE WITH REAL ONES
-float X_MS  = 1.0;   // mission site
-float Y_MS  = 2.0;
-float X_LIM = 3.0;   // before limbo/log
-float Y_LIM = 3.2;
+// Wi-Fi module pins (EDIT based on wiring)
+const int WIFI_TX_PIN = 0;   // Arduino → WiFi RX EDIT
+const int WIFI_RX_PIN = 0;   // Arduino ← WiFi TX EDIT
 
-float posX, posY, heading;
+// ===================================================
+// ✅ MOTOR WIRING MODE — CHOOSE ONE
+//   A) DIR + PWM  (L298N style)
+//   B) Neutral-128 single PWM
+// ===================================================
 
-// motion settings
-int fwdPWM  = 140;
-int turnPWM = 150;
+// ======= A) DIR + PWM MODE =======
+// Uncomment if USING DIR + PWM driver
+/*
+#define DRIVE_MODE_DIR  1
+// FRONT LEFT
+const int FL_PWM = 3;
+const int FL_DIR = 2;
 
-// --------------------------------------------
-// Basic helpers
-// --------------------------------------------
+// FRONT RIGHT
+const int FR_PWM = 5;
+const int FR_DIR = 12;
 
-void stopAll() {
-  Tank.turnOffMotors();
+// BACK LEFT
+const int BL_PWM = 6;
+const int BL_DIR = A3;
+
+// BACK RIGHT
+const int BR_PWM = 9;
+const int BR_DIR = A4;
+*/
+
+// ======= B) NEUTRAL-128 SINGLE PWM MODE =======
+// Uncomment if NO DIR PINS
+#define DRIVE_MODE_NEUTRAL 1
+const int FL_PWM = 3;
+const int FR_PWM = 5;
+const int BL_PWM = 6;
+const int BR_PWM = 9;
+// DIR pins NOT used in this mode
+
+
+// ===================================================
+// ✅ BASIC MOTOR HELPERS
+// ===================================================
+
+// ---------- DIR + PWM MODE ----------
+//Uncomment if USING DIR + PWM MODE
+/*
+#ifdef DRIVE_MODE_DIR
+void motorWriteSigned(float fl, float fr, float bl, float br) {
+  auto out = [](int pwmPin, int dirPin, float s) {
+    bool dir = (s >= 0.0f);
+    int m = (int)round(abs(s) * 255);
+    digitalWrite(dirPin, dir ? HIGH : LOW);
+    analogWrite(pwmPin, m);
+  };
+  out(FL_PWM, FL_DIR, fl);
+  out(FR_PWM, FR_DIR, fr);
+  out(BL_PWM, BL_DIR, bl);
+  out(BR_PWM, BR_DIR, br);
+}
+#endif
+
+
+// ---------- NEUTRAL-128 MODE ----------
+#ifdef DRIVE_MODE_NEUTRAL
+void motorWriteNeutral(float fl, float fr, float bl, float br) {
+  auto toPWM = [](float s) {
+    s = constrain(s, -1, 1);
+    return (int)(s * 127.0f + 128.0f);   // 128 = stop
+  };
+  analogWrite(FL_PWM, toPWM(fl));
+  analogWrite(FR_PWM, toPWM(fr));
+  analogWrite(BL_PWM, toPWM(bl));
+  analogWrite(BR_PWM, toPWM(br));
+}
+#endif
+*/
+
+// ===================================================
+// ✅ MOVEMENT HELPERS (both modes call these wrappers)
+// ===================================================
+void stopMotors() {
+#ifdef DRIVE_MODE_DIR
+  motorWriteSigned(0, 0, 0, 0);
+#endif
+#ifdef DRIVE_MODE_NEUTRAL
+  motorWriteNeutral(0, 0, 0, 0);
+#endif
 }
 
-// drive forward
-void driveForward() {
-  Tank.setLeftMotorPWM(fwdPWM);
-  Tank.setRightMotorPWM(fwdPWM);
+
+// forward (all wheels same direction)
+void driveForward(float speed) {
+  speed = constrain(speed, -1, 1);
+#ifdef DRIVE_MODE_DIR
+  motorWriteSigned(speed, speed, speed, speed);
+#endif
+#ifdef DRIVE_MODE_NEUTRAL
+  motorWriteNeutral(speed, speed, speed, speed);
+#endif
 }
 
-// drive backward
-void driveBackward() {
-  Tank.setLeftMotorPWM(-fwdPWM);
-  Tank.setRightMotorPWM(-fwdPWM);
+
+// turn left (right wheels fwd, left wheels rev)
+void turnLeft(float speed) {
+  speed = constrain(speed, -1, 1);
+#ifdef DRIVE_MODE_DIR
+  motorWriteSigned(-speed, speed, -speed, speed);
+#endif
+#ifdef DRIVE_MODE_NEUTRAL
+  motorWriteNeutral(-speed, speed, -speed, speed);
+#endif
 }
 
-// turn in place left
-void rotateLeft() {
-  Tank.setLeftMotorPWM(-turnPWM);
-  Tank.setRightMotorPWM(turnPWM);
-}
 
-// turn in place right
-void rotateRight() {
-  Tank.setLeftMotorPWM(turnPWM);
-  Tank.setRightMotorPWM(-turnPWM);
-}
-
-// directly set individual motor (1-4)
-void motorExample() {
-  Tank.setMotorPWM(1, 150);   // forward motor 1
-  Tank.setMotorPWM(2, 150);   // forward motor 2
-  delay(300);
-  Tank.turnOffMotors();
-}
-
-// update pose from vision
-void updatePose() {
-  posX    = Enes100.getX();
-  posY    = Enes100.getY();
-  heading = Enes100.getTheta();
-}
-
-// wrap angle
-float wrapAngle(float a) {
-  while (a > 3.14159)  a -= 2 * 3.14159;
-  while (a < -3.14159) a += 2 * 3.14159;
-  return a;
-}
-
-// turn to angle target
-void rotateTo(float targetTheta) {
-  updatePose();
-  float error = wrapAngle(targetTheta - heading);
-
-  while (abs(error) > 0.12) {
-    if (error > 0) rotateLeft();
-    else           rotateRight();
-
-    delay(50);
-    updatePose();
-    error = wrapAngle(targetTheta - heading);
-  }
-
-  stopAll();
-}
-
-// move to coordinate
-void goTo(float targetX, float targetY) {
-  updatePose();
-
-  float dx = targetX - posX;
-  float dy = targetY - posY;
-  float dist = sqrt(dx*dx + dy*dy);
-  float targetHeading = atan2(dy, dx);
-
-  // face target
-  rotateTo(targetHeading);
-
-  // drive forward
-  while (dist > 0.12) {
-    driveForward();
-    delay(80);
-
-    updatePose();
-    dx = targetX - posX;
-    dy = targetY - posY;
-    dist = sqrt(dx*dx + dy*dy);
-  }
-  stopAll();
-}
-
-// -----------------------------------------------------
-// Setup
-// -----------------------------------------------------
+// ===================================================
+// ✅ SETUP
+// ===================================================
 void setup() {
-  Serial.begin(9600);
-  Tank.begin();
+  Serial.begin(115200);
+  Serial.println("Booting...");
 
-  Enes100.begin(TEAM_NAME, MATERIAL, ARUCO_ID, 1116, 52, 50);
-  delay(300);
+  // Motor pin modes
+  pinMode(FL_PWM, OUTPUT);
+  pinMode(FR_PWM, OUTPUT);
+  pinMode(BL_PWM, OUTPUT);
+  pinMode(BR_PWM, OUTPUT);
 
-  Enes100.println("START Navigation");
+#ifdef DRIVE_MODE_DIR
+  pinMode(FL_DIR, OUTPUT);
+  pinMode(FR_DIR, OUTPUT);
+  pinMode(BL_DIR, OUTPUT);
+  pinMode(BR_DIR, OUTPUT);
+#endif
 
-  // read sensors: demo usage
-  float dist1 = Tank.readDistanceSensor(1);
-  int ir = Tank.readIrSensor(1);
-  int bump = Tank.readBumpSensor(1);
+  stopMotors();
 
-  Enes100.print("Ultrasonic: ");
-  Enes100.println(dist1);
+  // --- ENES100 Wi-Fi init ---
+  Enes100.begin(TEAM_NAME, TEAM_TYPE, MARKER_ID, ROOM_NUMBER,
+                WIFI_TX_PIN, WIFI_RX_PIN);
 
-  Enes100.print("IR1: ");
-  Enes100.println(ir);
-
-  Enes100.print("Bump front: ");
-  Enes100.println(bump);
-
-  // example: control individual motors
-  motorExample();
+  Enes100.println("MS5 STARTED");
+  Serial.println("ENES100 CONNECTED");
 }
 
-// -----------------------------------------------------
-// Main Loop
-// -----------------------------------------------------
+
+// ===================================================
+// ✅ SIMPLE TEST STATE MACHINE FOR MS5
+// ===================================================
+int step = 0;
+unsigned long t0 = 0;
+
 void loop() {
 
-  updatePose();
-  Enes100.print("Start at (");
-  Enes100.print(posX);
-  Enes100.print(",");
-  Enes100.print(posY);
-  Enes100.println(")");
+  // ==== SUBTASK #4 — Wireless RECEIVE ====
+  float x   = Enes100.getX();
+  float y   = Enes100.getY();
+  float th  = Enes100.getTheta();
+  bool vis  = Enes100.isVisible();
 
-  //-------------------------------------------
-  // Go to Mission Site
-  //-------------------------------------------
-  Enes100.println("Going to mission site...");
-  goTo(X_MS, Y_MS);
+  Serial.print("POSE: ");
+  Serial.print(x); Serial.print(", ");
+  Serial.print(y); Serial.print(", ");
+  Serial.print(th); Serial.print(", ");
+  Serial.println(vis ? "visible" : "NOT visible");
 
-  Enes100.println("At mission site.");
-  delay(800);
 
-  //-------------------------------------------
-  // Go to Pre-Limbo Point
-  //-------------------------------------------
-  Enes100.println("Going to limbo start...");
-  goTo(X_LIM, Y_LIM);
+  // ==== SUBTASK #5 — Wireless TRANSMIT ====
+  Enes100.println("MS5 test msg");
 
-  Enes100.println("Arrived at limbo staging.");
 
-  stopAll();
+  switch (step) {
 
-  // hold nicely
-  while (true);
+    // ==== SUBTASK #2 — FORWARD ====
+    case 0:
+      t0 = millis();
+      driveForward(0.6);   // adjust speed
+      step = 1;
+      break;
+
+    case 1:
+      if (millis() - t0 > 3000) {   // ~3 seconds
+        stopMotors();
+        delay(500);
+        step = 2;
+      }
+      break;
+
+
+    // ==== SUBTASK #3 — TURN 90° ====
+    case 2:
+      t0 = millis();
+      turnLeft(0.6);       // adjust speed
+      step = 3;
+      break;
+
+    case 3:
+      if (millis() - t0 > 700) {   // tune this
+        stopMotors();
+        step = 4;
+      }
+      break;
+
+    // DONE
+    default:
+      stopMotors();
+      break;
+  }
+
+  delay(50);
 }
