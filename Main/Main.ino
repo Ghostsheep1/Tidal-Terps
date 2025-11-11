@@ -13,7 +13,7 @@
 #include "Enes100.h"
 
 // ===================================================
-// ✅ REQUIRED ENES100 SETTINGS  (EDIT THESE)
+// REQUIRED ENES100 SETTINGS  (EDIT THESE)
 // ===================================================
 const char* TEAM_NAME   = "Tidal Terps";
 const byte  TEAM_TYPE   = WATER;
@@ -25,7 +25,7 @@ const int WIFI_TX_PIN = 0;   // Arduino → WiFi RX EDIT
 const int WIFI_RX_PIN = 0;   // Arduino ← WiFi TX EDIT
 
 // ===================================================
-// ✅ MOTOR WIRING MODE — CHOOSE ONE
+//   MOTOR WIRING MODE — CHOOSE ONE
 //   A) DIR + PWM  (L298N style)
 //   B) Neutral-128 single PWM
 // ===================================================
@@ -62,7 +62,7 @@ const int BR_PWM = 9;
 
 
 // ===================================================
-// ✅ BASIC MOTOR HELPERS
+// BASIC MOTOR HELPERS
 // ===================================================
 
 // ---------- DIR + PWM MODE ----------
@@ -100,7 +100,7 @@ void motorWriteNeutral(float fl, float fr, float bl, float br) {
 */
 
 // ===================================================
-// ✅ MOVEMENT HELPERS (both modes call these wrappers)
+// MOVEMENT HELPERS (both modes call these wrappers)
 // ===================================================
 void stopMotors() {
 #ifdef DRIVE_MODE_DIR
@@ -137,7 +137,7 @@ void turnLeft(float speed) {
 
 
 // ===================================================
-// ✅ SETUP
+// SETUP
 // ===================================================
 void setup() {
   Serial.begin(115200);
@@ -168,67 +168,11 @@ void setup() {
 
 
 // ===================================================
-// ✅ SIMPLE TEST STATE MACHINE FOR MS5
+// SIMPLE TEST STATE MACHINE FOR MS5
 // ===================================================
 int step = 0;
 unsigned long t0 = 0;
 
 void loop() {
 
-  // ==== SUBTASK #4 — Wireless RECEIVE ====
-  float x   = Enes100.getX();
-  float y   = Enes100.getY();
-  float th  = Enes100.getTheta();
-  bool vis  = Enes100.isVisible();
-
-  Serial.print("POSE: ");
-  Serial.print(x); Serial.print(", ");
-  Serial.print(y); Serial.print(", ");
-  Serial.print(th); Serial.print(", ");
-  Serial.println(vis ? "visible" : "NOT visible");
-
-
-  // ==== SUBTASK #5 — Wireless TRANSMIT ====
-  Enes100.println("MS5 test msg");
-
-
-  switch (step) {
-
-    // ==== SUBTASK #2 — FORWARD ====
-    case 0:
-      t0 = millis();
-      driveForward(0.6);   // adjust speed
-      step = 1;
-      break;
-
-    case 1:
-      if (millis() - t0 > 3000) {   // ~3 seconds
-        stopMotors();
-        delay(500);
-        step = 2;
-      }
-      break;
-
-
-    // ==== SUBTASK #3 — TURN 90° ====
-    case 2:
-      t0 = millis();
-      turnLeft(0.6);       // adjust speed
-      step = 3;
-      break;
-
-    case 3:
-      if (millis() - t0 > 700) {   // tune this
-        stopMotors();
-        step = 4;
-      }
-      break;
-
-    // DONE
-    default:
-      stopMotors();
-      break;
-  }
-
-  delay(50);
 }
