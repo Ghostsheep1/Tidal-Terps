@@ -1,5 +1,6 @@
 /*
- * ENES100 – MS6 MISSION-SPECIFIC TASKS
+ * ENES100 – MS6 INTEGRATED CODE
+ *  - Navigation (converted from Tank to motor helpers)
  *  - Mission I: Pollution detection (digital sensor)
  *  - Mission II: Water depth (ultrasonic, trig=7 echo=8)
  *  - Mission III: Sample collection (servo or pump)
@@ -7,24 +8,23 @@
 
 #include <Arduino.h>
 #include "Enes100.h"
-#include <Servo.h>   // Used for sample collection if USE_SAMPLE_SERVO is enabled
+#include <Servo.h>
 
 // ===================================================
 // REQUIRED ENES100 SETTINGS  (EDIT THESE)
 // ===================================================
 const char* TEAM_NAME   = "Tidal Terps";
 const byte  TEAM_TYPE   = WATER;
-const int   MARKER_ID   = 0;                  // <-- TODO: EDIT to your marker ID
+const int   MARKER_ID   = 0;      // TODO: put your ArUco marker ID
 const int   ROOM_NUMBER = 1116;
 
 // Wi-Fi module pins (EDIT based on wiring)
-const int WIFI_TX_PIN = 0;   // Arduino → WiFi RX  <-- TODO: set correct pin
-const int WIFI_RX_PIN = 0;   // Arduino ← WiFi TX  <-- TODO: set correct pin
+const int WIFI_TX_PIN = 0;   // Arduino → WiFi RX  TODO: set correct pin
+const int WIFI_RX_PIN = 0;   // Arduino ← WiFi TX  TODO: set correct pin
 
 // ===================================================
 //   MOTOR WIRING MODE — NEUTRAL-128 SINGLE PWM
 // ===================================================
-
 #define DRIVE_MODE_NEUTRAL 1
 const int FL_PWM = 3;
 const int FR_PWM = 5;
@@ -50,29 +50,24 @@ void motorWriteNeutral(float fl, float fr, float bl, float br) {
 }
 #endif
 
-// ===================================================
-// MOVEMENT HELPERS
-// ===================================================
+// “Tank-style” helper: set left/right motor PWM from -100..100
+void setTankPWM(int leftPWM, int rightPWM) {
+  float ls = constrain(leftPWM, -100, 100) / 100.0f;
+  float rs = constrain(rightPWM, -100, 100) / 100.0f;
+#ifdef DRIVE_MODE_NEUTRAL
+  motorWriteNeutral(ls, rs, ls, rs);
+#endif
+}
+
 void stopMotors() {
 #ifdef DRIVE_MODE_NEUTRAL
   motorWriteNeutral(0, 0, 0, 0);
 #endif
 }
 
-// forward (all wheels same direction)
-void driveForward(float speed) {
-  speed = constrain(speed, -1, 1);
-#ifdef DRIVE_MODE_NEUTRAL
-  motorWriteNeutral(speed, speed, speed, speed);
-#endif
-}
-
-// turn left (right wheels fwd, left wheels rev)
-void turnLeft(float speed) {
-  speed = constrain(speed, -1, 1);
-#ifdef DRIVE_MODE_NEUTRAL
-  motorWriteNeutral(-speed, speed, -speed, speed);
-#endif
+// Alias for old Tank API name
+void turnOffMotors() {
+  stopMotors();
 }
 
 // ===================================================
@@ -320,6 +315,181 @@ void missionObjectiveIII_CollectSample() {
 }
 
 // ===================================================
+// NAVIGATION STATE
+// ===================================================
+int stage = 0;
+
+// TODO: implement your real distance sensor here.
+// For now, it returns -1 (no obstacle).
+double readDistanceSensor(int id) {
+  // Example: front ultrasonic / IR
+  // return distance in meters, or -1 if no reading.
+  // TODO: hook this up to your real sensor.
+  return -1.0;
+}
+
+// This function is your old Tank-based navigation,
+// converted to use setTankPWM() and stopMotors().
+void navigationStep() {
+  float x = Enes100.getX();
+  float y = Enes100.getY();
+  float theta = Enes100.getTheta();
+
+  // DECIDE WHICH WAY FIRST
+  if (stage == 0) {
+    if (abs(y - 0.55) < 0.1) stage = 1;   // start bottom -> go UP
+    if (abs(y - 1.45) < 0.1) stage = 2;   // start top -> go DOWN
+  }
+
+  // STAGE 1: GO UP TO y ≈ 1.45
+  if (stage == 1) {
+
+    // align to +1.57 (up)
+    if (abs(theta - 1.57) > 0.08) {
+      if (theta < 1.57) {
+        setTankPWM(-50, 50);
+      } else {
+        setTankPWM(50, -50);
+      }
+      delay(10);
+      stopMotors();
+      delay(10);
+      return;
+    }
+
+    // drive up until y ≥ 1.40
+    if (y < 1.42) {
+      setTankPWM(100, 100);
+      delay(100);
+      stopMotors();
+      delay(80);
+      return;
+    }
+
+    // reached top
+    stage = 3;   // now go to limbo / next phase
+  }
+
+  // STAGE 2: GO DOWN TO y ≈ 0.55
+  if (stage == 2) {
+
+    // align to -1.57 (down)
+    if (abs(theta + 1.57) > 0.08) {
+      if (theta > -1.57) {
+        setTankPWM(30, -30);
+      } else {
+        setTankPWM(-30, 30);
+      }
+      delay(60);
+      stopMotors();
+      delay(60);
+      return;
+    }
+
+    // drive down until y ≤ 0.55
+    if (y > 0.58) {
+      setTankPWM(70, 70);
+      delay(100);
+      stopMotors();
+      delay(80);
+      return;
+    }
+    stage = 3;
+  }
+
+  // --- From here on is your "straight + adjustments" logic ---
+
+  // Rotate to face roughly θ ≈ 0
+  while (Enes100.getTheta() <= 0 || Enes100.getTheta() >= 0.1) {
+    setTankPWM(-40, 40);
+  }
+  setTankPWM(40, 40);
+
+  // --- NEW ADDITION: ensure OTV is above y = 1.2 when x >= 3.1 ---
+  if (Enes100.getX() >= 3.1 && Enes100.getY() < 1.2) {
+
+    // Turn to face upward (+1.57 radians)
+    while (abs(Enes100.getTheta() - 1.57) > 0.1) {
+      if (Enes100.getTheta() < 1.57) {
+        setTankPWM(-40, 40);
+      } else {
+        setTankPWM(40, -40);
+      }
+      delay(50);
+      stopMotors();
+      delay(50);
+    }
+
+    // Move up until y > 1.2
+    while (Enes100.getY() <= 1.2) {
+      setTankPWM(70, 70);
+      delay(100);
+      stopMotors();
+      delay(80);
+    }
+
+    // Reorient back to face forward (θ ≈ 0)
+    if (abs(theta - 1.57) > 0.08) {
+      if (theta < 1.57) {
+        setTankPWM(-50, 50);
+      } else {
+        setTankPWM(50, -50);
+      }
+      delay(10);
+      stopMotors();
+      delay(10);
+      return;
+    }
+  }
+  // --- END ADDITION ---
+
+  if (Enes100.getX() >= 3.6) {
+    stopMotors();
+
+    // TODO: This is likely where you want to run missions:
+    // missionObjectiveI_PollutionDetection();
+    // missionObjectiveII_DepthMeasurement();
+    // missionObjectiveIII_CollectSample();
+
+    while (1) {
+      // Stay here forever
+    }
+  }
+
+  double distance = readDistanceSensor(1);
+  Enes100.println(distance);
+
+  while (distance != -1 && distance <= 0.3) {
+    while (Enes100.getTheta() <= 1.5) {
+      setTankPWM(-40, 40);
+    }
+    if (Enes100.getY() >= 1.7) {
+      while (Enes100.getTheta() >= -1.4 || Enes100.getTheta() <= -1.7) {
+        setTankPWM(-40, 40);
+      }
+      setTankPWM(40, 40);
+      delay(8000);
+      while (Enes100.getTheta() <= 0 || Enes100.getTheta() >= 0.1) {
+        setTankPWM(-40, 40);
+      }
+    } else {
+      setTankPWM(40, 0); // left motor only, as in original logic (approx)
+      delay(2500);
+      while (Enes100.getTheta() >= 0) {
+        setTankPWM(40, -40);
+      }
+    }
+    distance = readDistanceSensor(1);
+  }
+
+  setTankPWM(40, 40);
+
+  Enes100.print("X = ");     Enes100.println(Enes100.getX());
+  Enes100.print("Y = ");     Enes100.println(Enes100.getY());
+  Enes100.print("Theta = "); Enes100.println(Enes100.getTheta());
+}
+
+// ===================================================
 // SETUP
 // ===================================================
 void setup() {
@@ -338,7 +508,7 @@ void setup() {
   Enes100.begin(TEAM_NAME, TEAM_TYPE, MARKER_ID, ROOM_NUMBER,
                 WIFI_TX_PIN, WIFI_RX_PIN);
 
-  Enes100.println("MS6 MISSION TASKS STARTED");
+  Enes100.println("MS6 INTEGRATED STARTED");
   Serial.println("ENES100 CONNECTED");
 
   // Mission I sensor init
@@ -364,36 +534,8 @@ void setup() {
 }
 
 // ===================================================
-// SIMPLE TEST FLOW FOR MISSIONS (no navigation yet)
+// MAIN LOOP
 // ===================================================
 void loop() {
-  // For now: just run the missions once each after startup.
-  // Your friend will replace this with a navigation state machine and
-  // call the missionObjective*() functions at the right times.
-
-  static bool mission1_done = false;
-  static bool mission2_done = false;
-  static bool mission3_done = false;
-
-  unsigned long now = millis();
-
-  // Run Mission I (pollution) ~3s after boot
-  if (!mission1_done && now > 3000) {
-    missionObjectiveI_PollutionDetection();
-    mission1_done = true;
-  }
-
-  // Run Mission II (depth) ~5s after boot
-  if (!mission2_done && now > 5000) {
-    missionObjectiveII_DepthMeasurement();
-    mission2_done = true;
-  }
-
-  // Run Mission III (sample) ~7s after boot
-  if (!mission3_done && now > 7000) {
-    missionObjectiveIII_CollectSample();
-    mission3_done = true;
-  }
-
-  // After all missions are done, do nothing. Navigation will be added later.
+  navigationStep();
 }
