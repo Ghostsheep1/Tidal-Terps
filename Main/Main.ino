@@ -3,7 +3,7 @@
  *  - Manual motor control (no Tank library)
  *  - Navigation using Enes100.getX(), getY(), getTheta()
  *  - Mission I: Pollution detection (digital sensor)
- *  - Mission II: Water depth (ultrasonic, trig=7 echo=8)
+ *  - Mission II: Water depth (ultrasonic, trig=7 echo=8, your calibration style)
  *  - Mission III: Sample collection (servo or pump)
  */
 
@@ -28,6 +28,7 @@ const int WIFI_RX_PIN = 11;   // TODO: choose RX pin
 
 // ===================================================
 //   MOTOR WIRING MODE — NEUTRAL-128 SINGLE PWM
+//   (matches your original MS5: 3,5,6,9)
 // ===================================================
 #define DRIVE_MODE_NEUTRAL 1
 const int FL_PWM = 3;
@@ -135,75 +136,80 @@ void missionObjectiveI_PollutionDetection() {
 }
 
 // ===================================================
-// MISSION-SPECIFIC OBJECTIVE II: WATER DEPTH (ULTRASONIC)
+// MISSION-SPECIFIC OBJECTIVE II: WATER DEPTH
+//  Using YOUR ultrasonic style (µs→mm)
 // ===================================================
 
-// Using your calibration wiring: trigPin = 7, echoPin = 8
-const int DEPTH_TRIG_PIN = 7;
-const int DEPTH_ECHO_PIN = 8;
+// Ultrasonic pins (NOTE: using 7/8 to avoid conflict with motors)
+// If you really want 2/3, move motors off 3 first.
+const int DEPTH_TRIG_PIN = 7;  // TODO: can set to 2 if you change motors
+const int DEPTH_ECHO_PIN = 8;  // TODO: can set to 3 if you change motors
 
-// Vertical distance from sensor face to pool bottom (cm)
-// TODO: measure with a ruler when robot is in mission position
-const float SENSOR_TO_POOL_BOTTOM_CM = 7.0;
+// Vertical distance from sensor face to pool bottom (mm)
+// Your example had "55 - mm", start with 55 and tune.
+long SENSOR_TO_POOL_BOTTOM_MM = 55;  // TODO: measure with a ruler & adjust
 
 // Optional timeout for pulseIn to avoid hanging
 const unsigned long ULTRASONIC_TIMEOUT_US = 30000; // 30 ms
 
+// Your conversion functions (kept for completeness)
 long microsecondsToInches(long microseconds) {
-  // According to Parallax's datasheet for the PING)))
-  return microseconds / 74 / 2;
+  return (microseconds / 74) / 2;
 }
 
 long microsecondsToCentimeters(long microseconds) {
-  // Speed of sound is ~29 µs per cm, round trip
-  return microseconds / 29 / 2;
+  return (microseconds / 29) / 2;
 }
 
-// Measure distance from sensor to water surface in centimeters.
+long microsecondsToMillimeters(long microseconds) {
+  // ~2.9 µs per mm, round trip
+  return (microseconds / 2.9) / 2;
+}
+
+// Measure distance from sensor to water surface in millimeters.
 // Returns negative value if no valid reading.
-float measureDistanceToWaterCM() {
-  // Trigger pulse
+long measureDistanceToWaterMM() {
+  long duration, mm;
+
+  pinMode(DEPTH_TRIG_PIN, OUTPUT);
   digitalWrite(DEPTH_TRIG_PIN, LOW);
   delayMicroseconds(2);
   digitalWrite(DEPTH_TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(DEPTH_TRIG_PIN, LOW);
 
-  // Echo
-  unsigned long duration = pulseIn(DEPTH_ECHO_PIN, HIGH, ULTRASONIC_TIMEOUT_US);
+  pinMode(DEPTH_ECHO_PIN, INPUT);
+  duration = pulseIn(DEPTH_ECHO_PIN, HIGH, ULTRASONIC_TIMEOUT_US);
+
   if (duration == 0) {
     Serial.println("Ultrasonic timeout: no echo");
-    return -1.0;
+    return -1;
   }
 
-  long cm = microsecondsToCentimeters(duration);
+  mm = microsecondsToMillimeters(duration);
 
   Serial.print("Sensor → water surface: ");
-  Serial.print(cm);
-  Serial.println(" cm");
+  Serial.print(mm);
+  Serial.println(" mm");
 
-  return (float)cm;
+  return mm;
 }
 
 // Returns estimated water depth in mm. Negative value = error.
 int getWaterDepthMM() {
-  float d_surface_cm = measureDistanceToWaterCM();
-  if (d_surface_cm < 0) {
+  long mm_to_surface = measureDistanceToWaterMM();
+  if (mm_to_surface < 0) {
     return -1;
   }
 
-  float depth_cm = SENSOR_TO_POOL_BOTTOM_CM - d_surface_cm;
-  if (depth_cm < 0) depth_cm = 0;
-
-  int depth_mm = (int)(depth_cm * 10.0 + 0.5); // cm -> mm
+  long depth_mm = SENSOR_TO_POOL_BOTTOM_MM - mm_to_surface;
+  if (depth_mm < 0) depth_mm = 0;
 
   Serial.print("Computed water depth: ");
-  Serial.print(depth_cm);
-  Serial.print(" cm (");
   Serial.print(depth_mm);
-  Serial.println(" mm)");
+  Serial.println(" mm");
 
-  return depth_mm;
+  return (int)depth_mm;
 }
 
 // Mission II:
@@ -240,7 +246,7 @@ void missionObjectiveII_DepthMeasurement() {
 #define USE_SAMPLE_SERVO   // default: using servo mechanism
 
 // Pick a free digital pin NOT already used.
-// Avoid 3,5,6,9 (motors) and 7,8 (ultrasonic).
+// Avoid 3,5,6,9 (motors), 7,8 (ultrasonic), 10,11 (WiFi).
 const int SAMPLE_ACTUATOR_PIN = 4;  // TODO: change if pin 4 is not free
 
 // Optional "sample full" sensor (e.g., microswitch). -1 = no sensor used.
@@ -347,11 +353,10 @@ void missionObjectiveIII_CollectSample() {
 int stage = 0;
 bool missionsDone = false;
 
-// TODO: implement your actual distance sensor.
+// TODO: implement your actual obstacle distance sensor if you have one.
 // For now, this stub returns -1 (meaning “no reading/no obstacle”).
 double readDistanceSensor(int /*id*/) {
-  // Hook up your real sensor here and return distance in meters
-  // or -1 if no object detected.
+  // Hook up a separate sensor here if you want obstacle avoidance.
   return -1.0;
 }
 
@@ -490,7 +495,7 @@ void navigationStep() {
     }
   }
 
-  // OBSTACLE AVOIDANCE REGION (using your distance sensor)
+  // OBSTACLE AVOIDANCE REGION (using your distance sensor, if you add one)
   double distance = readDistanceSensor(1);
   Enes100.println(distance);
 
@@ -530,7 +535,7 @@ void navigationStep() {
 // SETUP
 // ===================================================
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);  // matches your ultrasonic sketches
   Serial.println("Booting...");
 
   // Motor pin modes
@@ -574,7 +579,7 @@ void setup() {
 // MAIN LOOP
 // ===================================================
 void loop() {
-  // Navigation runs continuously, and when we reach the mission region,
+  // Navigation runs continuously; when we reach the mission region,
   // navigationStep() will call all three mission objectives once.
   navigationStep();
 }
