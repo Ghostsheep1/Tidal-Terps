@@ -1,6 +1,7 @@
 /*
  * ENES100 – MS6 FULL INTEGRATED CODE
- *  - Navigation (no Tank library)
+ *  - Manual motor control (no Tank library)
+ *  - Navigation using Enes100.getX(), getY(), getTheta()
  *  - Mission I: Pollution detection (digital sensor)
  *  - Mission II: Water depth (ultrasonic, trig=7 echo=8)
  *  - Mission III: Sample collection (servo or pump)
@@ -21,7 +22,7 @@ const int   ROOM_NUMBER = 1116;
 // Wi-Fi module pins (EDIT based on wiring)
 // Connect Arduino pin WIFI_TX_PIN → WiFi TX
 // Connect Arduino pin WIFI_RX_PIN → WiFi RX
-// On Uno, TX pin cannot be 0,1,13; we also avoid motor/sensor pins.
+// On Uno, TX pin cannot be 0,1,13
 const int WIFI_TX_PIN = 10;   // TODO: choose allowed TX pin
 const int WIFI_RX_PIN = 11;   // TODO: choose RX pin
 
@@ -73,7 +74,7 @@ void stopMotors() {
 #endif
 }
 
-// Simple wrappers if you want direct forward/turn functions
+// Optional simple wrappers
 void driveForward(float speed) { // speed -1..1
   speed = constrain(speed, -1, 1);
 #ifdef DRIVE_MODE_NEUTRAL
@@ -354,8 +355,7 @@ double readDistanceSensor(int /*id*/) {
   return -1.0;
 }
 
-// This function is your old navigation logic with all Tank.* calls
-// replaced by setWheelPWM() + stopMotors(), and using Enes100 for pose.
+// Navigation logic (was Tank-based, now uses setWheelPWM & Enes100)
 void navigationStep() {
   float x     = Enes100.getX();
   float y     = Enes100.getY();
@@ -484,10 +484,8 @@ void navigationStep() {
 
     missionsDone = true;
 
-    // After missions completed, you can either stay put or
-    // add code to drive to the finish. For now, loop forever.
+    // After missions completed, stay put for now.
     while (1) {
-      // hold position
       stopMotors();
     }
   }
