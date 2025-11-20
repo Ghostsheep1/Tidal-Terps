@@ -1,10 +1,12 @@
 /*
- * ENES100 – MS6 FULL INTEGRATED CODE (CLEANED)
- *  - Manual motor control
- *  - Navigation using Enes100.getX/Y/Theta()
- *  - Mission I: Pollution detection
- *  - Mission II: Water depth measurement
- *  - Mission III: Sample collection (servo/pump)
+ * ENES100 - MS6 WATER MISSION - INTEGRATED CODE
+ * Team: Tidal Terps
+ * Board: Arduino Mega 2560
+ * 
+ * Mission Objectives:
+ *  I.   Water Type Detection (Color Sensor - TCS3200)
+ *  II.  Water Depth Measurement (Ultrasonic - Bottom)
+ *  III. Sample Collection (Servo + Vacuum Pump)
  */
 
 #include <Arduino.h>
@@ -12,296 +14,545 @@
 #include <Servo.h>
 
 // ===================================================
-// TEAM / WIFI CONFIGURATION
+// TEAM CONFIGURATION
 // ===================================================
 const char* TEAM_NAME   = "Tidal Terps";
 const byte  TEAM_TYPE   = WATER;
-const int   MARKER_ID   = 0;     
-const int   ROOM_NUMBER = 1116;
-
-const int WIFI_TX_PIN = 10;
-const int WIFI_RX_PIN = 11;
+const int   MARKER_ID   = 0;        // Update with your actual marker ID
+const int   ROOM_NUMBER = 1116;     // 1116 or 1120
 
 // ===================================================
-// MOTOR CONFIGURATION (Neutral-128 single PWM)
+// PIN ASSIGNMENTS - ARDUINO MEGA
 // ===================================================
-#define DRIVE_MODE_NEUTRAL 1
 
-const int FL_PWM = 3;
-const int FR_PWM = 5;
-const int BL_PWM = 6;
-const int BR_PWM = 9;
+// Wi-Fi Module (Hardware Serial1)
+const int WIFI_TX_PIN = 18;  // TX1 on Mega
+const int WIFI_RX_PIN = 19;  // RX1 on Mega
+
+// Motor Shield Pins
+const int MOTOR_M1_PIN1 = 11;
+const int MOTOR_M1_PIN2 = 12;
+const int MOTOR_M2_PIN1 = 3;
+const int MOTOR_M2_PIN2 = 4;
+const int MOTOR_M3_PIN1 = 5;
+const int MOTOR_M3_PIN2 = 7;
+const int MOTOR_M4_PIN1 = 8;
+const int MOTOR_M4_PIN2 = 9;
+
+// Color Sensor (TCS3200) - Mission I
+const int COLOR_S0  = 28;
+const int COLOR_S1  = 29;
+const int COLOR_S2  = 30;
+const int COLOR_S3  = 31;
+const int COLOR_OUT = 32;
+
+// Ultrasonic Sensors
+const int US_FRONT_TRIG = 24;
+const int US_FRONT_ECHO = 25;
+const int US_BOTTOM_TRIG = 26;  // For depth measurement
+const int US_BOTTOM_ECHO = 27;
+
+// Sample Collection Mechanism - Mission III
+const int SERVO_PIN = 44;
+const int PUMP_PIN  = 46;
 
 // ===================================================
-// MOTOR HELPERS
+// MOTOR CONTROL
 // ===================================================
-int signedToNeutralPWM(float s) {
-  s = constrain(s, -1.0, 1.0);
-  return int(s * 127.0f + 128.0f);
+
+// Motor configuration: M1=FL, M2=FR, M3=BL, M4=BR
+void setupMotors() {
+  pinMode(MOTOR_M1_PIN1, OUTPUT);
+  pinMode(MOTOR_M1_PIN2, OUTPUT);
+  pinMode(MOTOR_M2_PIN1, OUTPUT);
+  pinMode(MOTOR_M2_PIN2, OUTPUT);
+  pinMode(MOTOR_M3_PIN1, OUTPUT);
+  pinMode(MOTOR_M3_PIN2, OUTPUT);
+  pinMode(MOTOR_M4_PIN1, OUTPUT);
+  pinMode(MOTOR_M4_PIN2, OUTPUT);
 }
 
-void motorWriteNeutral(float fl, float fr, float bl, float br) {
-  analogWrite(FL_PWM, signedToNeutralPWM(fl));
-  analogWrite(FR_PWM, signedToNeutralPWM(fr));
-  analogWrite(BL_PWM, signedToNeutralPWM(bl));
-  analogWrite(BR_PWM, signedToNeutralPWM(br));
+void setMotorSpeed(int m1Speed, int m2Speed, int m3Speed, int m4Speed) {
+  // M1 - Front Left
+  if (m1Speed > 0) {
+    analogWrite(MOTOR_M1_PIN1, m1Speed);
+    analogWrite(MOTOR_M1_PIN2, 0);
+  } else {
+    analogWrite(MOTOR_M1_PIN1, 0);
+    analogWrite(MOTOR_M1_PIN2, -m1Speed);
+  }
+  
+  // M2 - Front Right
+  if (m2Speed > 0) {
+    analogWrite(MOTOR_M2_PIN1, m2Speed);
+    analogWrite(MOTOR_M2_PIN2, 0);
+  } else {
+    analogWrite(MOTOR_M2_PIN1, 0);
+    analogWrite(MOTOR_M2_PIN2, -m2Speed);
+  }
+  
+  // M3 - Back Left
+  if (m3Speed > 0) {
+    analogWrite(MOTOR_M3_PIN1, m3Speed);
+    analogWrite(MOTOR_M3_PIN2, 0);
+  } else {
+    analogWrite(MOTOR_M3_PIN1, 0);
+    analogWrite(MOTOR_M3_PIN2, -m3Speed);
+  }
+  
+  // M4 - Back Right
+  if (m4Speed > 0) {
+    analogWrite(MOTOR_M4_PIN1, m4Speed);
+    analogWrite(MOTOR_M4_PIN2, 0);
+  } else {
+    analogWrite(MOTOR_M4_PIN1, 0);
+    analogWrite(MOTOR_M4_PIN2, -m4Speed);
+  }
 }
 
-void setWheelPWM(int leftPercent, int rightPercent) {
-  float l = constrain(leftPercent, -100, 100) / 100.0;
-  float r = constrain(rightPercent, -100, 100) / 100.0;
-  motorWriteNeutral(l, r, l, r);
+void driveForward(int speed) {
+  speed = constrain(speed, 0, 255);
+  setMotorSpeed(speed, speed, speed, speed);
+}
+
+void driveBackward(int speed) {
+  speed = constrain(speed, 0, 255);
+  setMotorSpeed(-speed, -speed, -speed, -speed);
+}
+
+void turnLeft(int speed) {
+  speed = constrain(speed, 0, 255);
+  setMotorSpeed(-speed, speed, -speed, speed);
+}
+
+void turnRight(int speed) {
+  speed = constrain(speed, 0, 255);
+  setMotorSpeed(speed, -speed, speed, -speed);
 }
 
 void stopMotors() {
-  motorWriteNeutral(0, 0, 0, 0);
-}
-
-void driveForward(float s) {
-  s = constrain(s, -1, 1);
-  motorWriteNeutral(s, s, s, s);
-}
-
-void turnLeft(float s) {
-  s = constrain(s, -1, 1);
-  motorWriteNeutral(-s, s, -s, s);
+  setMotorSpeed(0, 0, 0, 0);
 }
 
 // ===================================================
-// MISSION I – POLLUTION DETECTION
+// MISSION I: WATER TYPE DETECTION (COLOR SENSOR)
 // ===================================================
-const int  POLLUTANT_SENSOR_PIN = A0;
-const bool POLLUTED_ON_HIGH     = false;
+
+void setupColorSensor() {
+  pinMode(COLOR_S0, OUTPUT);
+  pinMode(COLOR_S1, OUTPUT);
+  pinMode(COLOR_S2, OUTPUT);
+  pinMode(COLOR_S3, OUTPUT);
+  pinMode(COLOR_OUT, INPUT);
+  
+  // Set frequency scaling to 20%
+  digitalWrite(COLOR_S0, HIGH);
+  digitalWrite(COLOR_S1, LOW);
+}
+
+// Read color frequency for a specific filter
+long readColorFrequency(char color) {
+  switch(color) {
+    case 'R':  // Red
+      digitalWrite(COLOR_S2, LOW);
+      digitalWrite(COLOR_S3, LOW);
+      break;
+    case 'G':  // Green
+      digitalWrite(COLOR_S2, HIGH);
+      digitalWrite(COLOR_S3, HIGH);
+      break;
+    case 'B':  // Blue
+      digitalWrite(COLOR_S2, LOW);
+      digitalWrite(COLOR_S3, HIGH);
+      break;
+    case 'C':  // Clear (no filter)
+      digitalWrite(COLOR_S2, HIGH);
+      digitalWrite(COLOR_S3, LOW);
+      break;
+  }
+  
+  delay(100);  // Allow sensor to settle
+  return pulseIn(COLOR_OUT, LOW, 50000);  // 50ms timeout
+}
 
 bool isWaterPolluted() {
-  int v = digitalRead(POLLUTANT_SENSOR_PIN);
-  Serial.print("Pollution reading = "); Serial.println(v);
-  return POLLUTED_ON_HIGH ? (v == HIGH) : (v == LOW);
+  long red   = readColorFrequency('R');
+  long green = readColorFrequency('G');
+  long blue  = readColorFrequency('B');
+  
+  Serial.print("RGB: ");
+  Serial.print(red);
+  Serial.print(", ");
+  Serial.print(green);
+  Serial.print(", ");
+  Serial.println(blue);
+  
+  // Determine if polluted based on color readings
+  // Adjust these thresholds based on calibration
+  // Lower frequency = more light detected
+  
+  // Example logic: if green is significantly lower than red/blue, water is polluted
+  bool polluted = (green < red * 0.7) && (green < blue * 0.7);
+  
+  return polluted;
 }
 
-void missionObjectiveI_PollutionDetection() {
+void missionObjectiveI_WaterType() {
+  Serial.println("MISSION I: Detecting Water Type...");
+  Enes100.println("MISSION_I: START");
+  
+  stopMotors();
+  delay(500);  // Allow readings to stabilize
+  
   bool polluted = isWaterPolluted();
-  int result = polluted ? FRESH_POLLUTED : FRESH_UNPOLLUTED;
-
-  Serial.print("MISSION_I: ");
-  Serial.println(polluted ? "WATER_POLLUTED" : "WATER_CLEAN");
-
-  Enes100.mission(WATER_TYPE, result);
-  Enes100.print("MISSION_I_FLAG: ");
-  Enes100.println(polluted ? 1 : 0);
+  
+  if (polluted) {
+    Serial.println("MISSION_I: FRESH_POLLUTED");
+    Enes100.println("MISSION_I: FRESH_POLLUTED");
+    Enes100.mission(WATER_TYPE, FRESH_POLLUTED);
+  } else {
+    Serial.println("MISSION_I: FRESH_UNPOLLUTED");
+    Enes100.println("MISSION_I: FRESH_UNPOLLUTED");
+    Enes100.mission(WATER_TYPE, FRESH_UNPOLLUTED);
+  }
+  
+  delay(500);
 }
 
 // ===================================================
-// MISSION II – WATER DEPTH MEASUREMENT
+// MISSION II: WATER DEPTH MEASUREMENT
 // ===================================================
-const int DEPTH_TRIG_PIN = 7;
-const int DEPTH_ECHO_PIN = 8;
 
-long SENSOR_TO_POOL_BOTTOM_MM = 55;
-const unsigned long ULTRA_TIMEOUT = 30000;
+void setupDepthSensor() {
+  pinMode(US_BOTTOM_TRIG, OUTPUT);
+  pinMode(US_BOTTOM_ECHO, INPUT);
+  digitalWrite(US_BOTTOM_TRIG, LOW);
+}
 
-long microsecondsToMillimeters(long us) { return (us / 2.9) / 2; }
-
-long measureDistanceToWaterMM() {
-  digitalWrite(DEPTH_TRIG_PIN, LOW);
+long measureDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
-  digitalWrite(DEPTH_TRIG_PIN, HIGH);
+  digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
-  digitalWrite(DEPTH_TRIG_PIN, LOW);
-
-  long duration = pulseIn(DEPTH_ECHO_PIN, HIGH, ULTRA_TIMEOUT);
-  if (duration == 0) return -1;
-
-  long mm = microsecondsToMillimeters(duration);
-  Serial.print("Surface dist: "); Serial.print(mm); Serial.println(" mm");
+  digitalWrite(trigPin, LOW);
+  
+  long duration = pulseIn(echoPin, HIGH, 30000);  // 30ms timeout
+  
+  if (duration == 0) {
+    return -1;  // No echo received
+  }
+  
+  // Convert to millimeters (speed of sound = 343 m/s)
+  // distance = (duration / 2) / 29.1 cm = (duration / 2) / 2.91 mm
+  long mm = (duration * 10) / 58;  // Simplified: duration / 2.9 / 2
+  
   return mm;
 }
 
 int getWaterDepthMM() {
-  long mm_surface = measureDistanceToWaterMM();
-  if (mm_surface < 0) return -1;
-
-  long depth = SENSOR_TO_POOL_BOTTOM_MM - mm_surface;
+  // Distance from sensor to pool bottom when empty (calibrate this!)
+  const long SENSOR_TO_BOTTOM_MM = 150;  // Adjust based on your setup
+  
+  long distanceToSurface = measureDistance(US_BOTTOM_TRIG, US_BOTTOM_ECHO);
+  
+  if (distanceToSurface < 0) {
+    Serial.println("Depth sensor error: no echo");
+    return -1;
+  }
+  
+  Serial.print("Distance to surface: ");
+  Serial.print(distanceToSurface);
+  Serial.println(" mm");
+  
+  long depth = SENSOR_TO_BOTTOM_MM - distanceToSurface;
   if (depth < 0) depth = 0;
-
-  Serial.print("Depth = "); Serial.println(depth);
-  return depth;
+  
+  return (int)depth;
 }
 
-void missionObjectiveII_DepthMeasurement() {
-  int depth = getWaterDepthMM();
-  if (depth < 0) {
-    Serial.println("MISSION_II: DEPTH_ERROR");
-    return;
-  }
-
-  Serial.print("MISSION_II: DEPTH_MM="); Serial.println(depth);
-  Enes100.mission(DEPTH, depth);
-}
-
-// ===================================================
-// MISSION III – SAMPLE COLLECTION (Servo)
-// ===================================================
-#define USE_SAMPLE_SERVO
-
-const int SAMPLE_ACTUATOR_PIN = 4;
-const int SAMPLE_FULL_SENSOR_PIN = -1;
-
-#ifdef USE_SAMPLE_SERVO
-Servo sampleServo;
-const int SAMPLE_SERVO_CLOSED = 0;
-const int SAMPLE_SERVO_OPEN   = 90;
-const unsigned long SAMPLE_OPEN_TIME = 1500;
-
-void openSampleValve() {
-  Serial.println("Sample servo: OPEN");
-  sampleServo.write(SAMPLE_SERVO_OPEN);
-  delay(SAMPLE_OPEN_TIME);
-  sampleServo.write(SAMPLE_SERVO_CLOSED);
-}
-#endif
-
-bool isSampleFull() {
-  if (SAMPLE_FULL_SENSOR_PIN < 0) return false;
-  return digitalRead(SAMPLE_FULL_SENSOR_PIN) == LOW;
-}
-
-void missionObjectiveIII_CollectSample() {
-  Serial.println("MISSION_III: START");
+void missionObjectiveII_WaterDepth() {
+  Serial.println("MISSION II: Measuring Water Depth...");
+  Enes100.println("MISSION_II: START");
+  
   stopMotors();
-
-  if (isSampleFull()) {
-    Serial.println("Already full.");
+  delay(500);
+  
+  int depth = getWaterDepthMM();
+  
+  if (depth < 0) {
+    Serial.println("MISSION_II: ERROR");
+    Enes100.println("MISSION_II: DEPTH_ERROR");
     return;
   }
+  
+  Serial.print("MISSION_II: DEPTH = ");
+  Serial.print(depth);
+  Serial.println(" mm");
+  
+  Enes100.print("MISSION_II: DEPTH_MM=");
+  Enes100.println(depth);
+  
+  Enes100.mission(DEPTH, depth);
+  
+  delay(500);
+}
 
-#ifdef USE_SAMPLE_SERVO
-  openSampleValve();
-#endif
+// ===================================================
+// MISSION III: SAMPLE COLLECTION
+// ===================================================
 
-  Serial.println(isSampleFull() ? "SAMPLE_COLLECTED" : "SAMPLE_NOT_CONFIRMED");
+Servo sampleServo;
+
+void setupSampleCollection() {
+  pinMode(PUMP_PIN, OUTPUT);
+  digitalWrite(PUMP_PIN, LOW);
+  
+  sampleServo.attach(SERVO_PIN);
+  sampleServo.write(0);  // Closed position
+}
+
+void collectSample() {
+  const int SERVO_OPEN_ANGLE = 90;   // Adjust as needed
+  const int SERVO_CLOSE_ANGLE = 0;
+  const unsigned long COLLECTION_TIME_MS = 3000;  // 3 seconds
+  
+  Serial.println("Opening collection mechanism...");
+  sampleServo.write(SERVO_OPEN_ANGLE);
+  delay(500);
+  
+  Serial.println("Starting vacuum pump...");
+  digitalWrite(PUMP_PIN, HIGH);
+  delay(COLLECTION_TIME_MS);
+  
+  Serial.println("Stopping pump...");
+  digitalWrite(PUMP_PIN, LOW);
+  delay(500);
+  
+  Serial.println("Closing collection mechanism...");
+  sampleServo.write(SERVO_CLOSE_ANGLE);
+  delay(500);
+}
+
+void missionObjectiveIII_SampleCollection() {
+  Serial.println("MISSION III: Collecting Sample...");
+  Enes100.println("MISSION_III: START");
+  
+  stopMotors();
+  delay(1000);
+  
+  collectSample();
+  
+  Serial.println("MISSION_III: SAMPLE_COLLECTED");
+  Enes100.println("MISSION_III: COMPLETE");
+  
+  delay(500);
 }
 
 // ===================================================
 // NAVIGATION
 // ===================================================
-int stage = 0;
-bool missionsDone = false;
 
-double readDistanceSensor(int) { return -1.0; }
+int navigationStage = 0;
+bool missionsCompleted = false;
 
-void navigationStep() {
+void alignToAngle(float targetAngle, float tolerance = 0.1) {
+  while (abs(Enes100.getTheta() - targetAngle) > tolerance) {
+    float currentAngle = Enes100.getTheta();
+    float diff = targetAngle - currentAngle;
+    
+    // Handle angle wrap-around
+    if (diff > PI) diff -= 2*PI;
+    if (diff < -PI) diff += 2*PI;
+    
+    if (diff > 0) {
+      turnLeft(60);
+    } else {
+      turnRight(60);
+    }
+    
+    delay(50);
+    stopMotors();
+    delay(50);
+  }
+  stopMotors();
+}
+
+void navigate() {
   float x = Enes100.getX();
   float y = Enes100.getY();
-  float t = Enes100.getTheta();
-
-  // Identify start region
-  if (stage == 0) {
-    if (abs(y - 0.55) < 0.1) stage = 1; 
-    if (abs(y - 1.45) < 0.1) stage = 2;
-  }
-
-  // ---- STAGE 1: Move UP ----
-  if (stage == 1) {
-    if (abs(t - 1.57) > 0.08) {
-      setWheelPWM(t < 1.57 ? -50 : 50, t < 1.57 ? 50 : -50);
-      delay(10); stopMotors(); delay(10);
-      return;
+  float theta = Enes100.getTheta();
+  
+  // Debug output
+  Serial.print("Position: X=");
+  Serial.print(x);
+  Serial.print(" Y=");
+  Serial.print(y);
+  Serial.print(" Theta=");
+  Serial.println(theta);
+  
+  // Stage 0: Determine initial direction
+  if (navigationStage == 0) {
+    if (y < 1.0) {
+      navigationStage = 1;  // Start low, go up
+      Serial.println("Starting from bottom - going UP");
+    } else {
+      navigationStage = 2;  // Start high, go down
+      Serial.println("Starting from top - going DOWN");
     }
-    if (y < 1.42) {
-      setWheelPWM(100, 100);
-      delay(100); stopMotors(); delay(80);
-      return;
-    }
-    stage = 3;
+    return;
   }
-
-  // ---- STAGE 2: Move DOWN ----
-  if (stage == 2) {
-    if (abs(t + 1.57) > 0.08) {
-      setWheelPWM(t > -1.57 ? 30 : -30, t > -1.57 ? -30 : 30);
-      delay(60); stopMotors(); delay(60);
-      return;
+  
+  // Stage 1: Move up to y ≈ 1.4
+  if (navigationStage == 1) {
+    if (y < 1.35) {
+      alignToAngle(PI/2, 0.15);  // Point up (90 degrees)
+      driveForward(120);
+      delay(200);
+      stopMotors();
+      delay(100);
+    } else {
+      Serial.println("Reached top corridor");
+      navigationStage = 3;
     }
-    if (y > 0.58) {
-      setWheelPWM(70, 70);
-      delay(100); stopMotors(); delay(80);
-      return;
+    return;
+  }
+  
+  // Stage 2: Move down to y ≈ 0.6
+  if (navigationStage == 2) {
+    if (y > 0.65) {
+      alignToAngle(-PI/2, 0.15);  // Point down (-90 degrees)
+      driveForward(120);
+      delay(200);
+      stopMotors();
+      delay(100);
+    } else {
+      Serial.println("Reached bottom corridor");
+      navigationStage = 3;
     }
-    stage = 3;
+    return;
   }
-
-  // ---- Face θ ≈ 0 ----
-  while (t <= 0 || t >= 0.1) setWheelPWM(-40, 40);
-  setWheelPWM(40, 40);
-
-  // ---- Ensure Y ≥ 1.2 past X ≥ 3.1 ----
-  if (x >= 3.1 && y < 1.2) {
-    while (abs(t - 1.57) > 0.1)
-      setWheelPWM(t < 1.57 ? -40 : 40, t < 1.57 ? 40 : -40);
-
-    while (Enes100.getY() <= 1.2)
-      setWheelPWM(70, 70);
-
-    while (t <= 0 || t >= 0.1)
-      setWheelPWM(-40, 40);
+  
+  // Stage 3: Drive forward to mission site
+  if (navigationStage == 3) {
+    // Align to face forward (0 radians)
+    alignToAngle(0, 0.1);
+    
+    // Check if we need to adjust Y position for obstacles
+    if (x > 3.0 && y < 1.1) {
+      Serial.println("Adjusting Y position for safety");
+      alignToAngle(PI/2, 0.15);
+      while (Enes100.getY() < 1.2) {
+        driveForward(100);
+        delay(100);
+        stopMotors();
+        delay(50);
+      }
+    }
+    
+    // Drive forward to mission area
+    if (x < 3.5 && !missionsCompleted) {
+      driveForward(100);
+      delay(150);
+      stopMotors();
+      delay(100);
+    } else if (!missionsCompleted) {
+      navigationStage = 4;  // Reached mission site
+    }
+    return;
   }
-
-  // ---- Run Missions ----
-  if (!missionsDone && x >= 3.6) {
+  
+  // Stage 4: Execute missions
+  if (navigationStage == 4 && !missionsCompleted) {
     stopMotors();
-
-    missionObjectiveI_PollutionDetection();
-    missionObjectiveII_DepthMeasurement();
-    missionObjectiveIII_CollectSample();
-
-    missionsDone = true;
-
-    while (true) stopMotors();
+    Serial.println("\n=== EXECUTING ALL MISSIONS ===\n");
+    Enes100.println("ARRIVED AT MISSION SITE");
+    
+    delay(1000);
+    
+    missionObjectiveI_WaterType();
+    delay(1000);
+    
+    missionObjectiveII_WaterDepth();
+    delay(1000);
+    
+    missionObjectiveIII_SampleCollection();
+    delay(1000);
+    
+    missionsCompleted = true;
+    Serial.println("\n=== ALL MISSIONS COMPLETE ===\n");
+    Enes100.println("ALL MISSIONS COMPLETE");
+    
+    navigationStage = 5;
+    return;
   }
+  
+  // Stage 5: Hold position after missions
+  if (navigationStage == 5) {
+    stopMotors();
+    delay(1000);
+  }
+}
 
-  // ---- Default forward ----
-  setWheelPWM(40, 40);
+// ===================================================
+// OBSTACLE AVOIDANCE (FRONT ULTRASONIC)
+// ===================================================
 
-  Enes100.print("X="); Enes100.println(x);
-  Enes100.print("Y="); Enes100.println(y);
-  Enes100.print("Theta="); Enes100.println(t);
+float getFrontDistance() {
+  long mm = measureDistance(US_FRONT_TRIG, US_FRONT_ECHO);
+  if (mm < 0) return -1;
+  return mm / 1000.0;  // Convert to meters
 }
 
 // ===================================================
 // SETUP
 // ===================================================
+
 void setup() {
   Serial.begin(9600);
-  Serial.println("Booting...");
-
-  pinMode(FL_PWM, OUTPUT);
-  pinMode(FR_PWM, OUTPUT);
-  pinMode(BL_PWM, OUTPUT);
-  pinMode(BR_PWM, OUTPUT);
-
+  Serial.println("\n\n=== ENES100 WATER MISSION ===");
+  Serial.println("Team: Tidal Terps");
+  Serial.println("Initializing...\n");
+  
+  // Initialize motors
+  setupMotors();
   stopMotors();
-
+  
+  // Initialize Wi-Fi and Vision System
+  Serial.println("Connecting to Vision System...");
   Enes100.begin(TEAM_NAME, TEAM_TYPE, MARKER_ID, ROOM_NUMBER,
                 WIFI_TX_PIN, WIFI_RX_PIN);
-
-  pinMode(POLLUTANT_SENSOR_PIN, INPUT);
-
-  pinMode(DEPTH_TRIG_PIN, OUTPUT);
-  pinMode(DEPTH_ECHO_PIN, INPUT);
-
-  pinMode(SAMPLE_ACTUATOR_PIN, OUTPUT);
-  digitalWrite(SAMPLE_ACTUATOR_PIN, LOW);
-
-#ifdef USE_SAMPLE_SERVO
-  sampleServo.attach(SAMPLE_ACTUATOR_PIN);
-  sampleServo.write(SAMPLE_SERVO_CLOSED);
-#endif
+  
+  Serial.println("Connected to Vision System!");
+  Enes100.println("=== SYSTEM ONLINE ===");
+  
+  // Initialize sensors
+  setupColorSensor();
+  setupDepthSensor();
+  pinMode(US_FRONT_TRIG, OUTPUT);
+  pinMode(US_FRONT_ECHO, INPUT);
+  
+  // Initialize sample collection
+  setupSampleCollection();
+  
+  Serial.println("All systems ready!\n");
+  delay(2000);
 }
 
 // ===================================================
-// LOOP
+// MAIN LOOP
 // ===================================================
+
 void loop() {
-  navigationStep();
+  // Check if we can get position data
+  if (!Enes100.isVisible()) {
+    Serial.println("Marker not visible - waiting...");
+    stopMotors();
+    delay(500);
+    return;
+  }
+  
+  // Execute navigation
+  navigate();
+  
+  delay(50);  // Small delay for stability
 }
