@@ -1,3 +1,5 @@
+#include <Enes100.h>
+
 /*
  * ENES100 - MS6 WATER MISSION - INTEGRATED CODE
  * Team: Tidal Terps
