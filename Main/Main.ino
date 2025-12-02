@@ -267,7 +267,9 @@ int getWaterDepthMM() {
   long depth = SENSOR_TO_BOTTOM_MM - distanceToSurface;
   if (depth < 0) depth = 0;
   
-  return (int)depth;
+  int d20 = abs(depth-20), d30 = abs(depth-30), d40 = abs(depth-40);
+  return (d20<d30 && d20<d40)?20:(d30<d20 && d30<d40)?30:40;
+
 }
 
 void missionObjectiveII_WaterDepth() {
