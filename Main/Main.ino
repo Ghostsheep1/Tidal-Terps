@@ -17,13 +17,9 @@
 // TEAM CONFIGURATION
 // ===================================================
 const char* TEAM_NAME   = "Tidal Terps";
-const byte  TEAM_TYPE   = WATER;
-<<<<<<< Updated upstream
-const int   MARKER_ID   = 7;        
-=======
-const int   MARKER_ID   = 0;        // Update with your actual marker ID
->>>>>>> Stashed changes
-const int   ROOM_NUMBER = 1116;     
+const byte  TEAM_TYPE   = WATER;      
+const int   MARKER_ID   = 512;       
+const int   ROOM_NUMBER = 1201;     
 
 // ===================================================
 // PIN ASSIGNMENTS - ARDUINO MEGA
