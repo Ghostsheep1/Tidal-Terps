@@ -18,16 +18,16 @@
 // ===================================================
 const char* TEAM_NAME   = "Tidal Terps";
 const byte  TEAM_TYPE   = WATER;
-const int   MARKER_ID   = 0;        // Update with your actual marker ID
-const int   ROOM_NUMBER = 1116;     // 1116 or 1120
+const int   MARKER_ID   = 7;        
+const int   ROOM_NUMBER = 1116;     
 
 // ===================================================
 // PIN ASSIGNMENTS - ARDUINO MEGA
 // ===================================================
 
 // Wi-Fi Module (Hardware Serial1)
-const int WIFI_TX_PIN = 18;  // TX1 on Mega
-const int WIFI_RX_PIN = 19;  // RX1 on Mega
+const int WIFI_TX_PIN = 50;  // TX1 on Mega
+const int WIFI_RX_PIN = 51;  // RX1 on Mega
 
 // Motor Shield Pins
 const int MOTOR_M1_PIN1 = 11;
