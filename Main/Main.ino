@@ -26,8 +26,8 @@ const int   ROOM_NUMBER = 1116;
 // ===================================================
 
 // Wi-Fi Module (Hardware Serial1)
-const int WIFI_TX_PIN = 63;  // TX1 on Mega
-const int WIFI_RX_PIN = 62;  // RX1 on Mega
+const int WIFI_TX_PIN = 62;  // TX1 on Mega
+const int WIFI_RX_PIN = 63;  // RX1 on Mega
 
 // Motor Shield Pins
 const int MOTOR_M1_PIN1 = 11;
