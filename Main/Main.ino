@@ -123,11 +123,13 @@ void driveBackward(int speed) {
 void turnLeft(int speed) {
   speed = constrain(speed, 0, 255);
   setMotorSpeed(-speed, speed, -speed, speed);
+  delay(200)
 }
 
 void turnRight(int speed) {
   speed = constrain(speed, 0, 255);
   setMotorSpeed(speed, -speed, speed, -speed);
+  delay(200)
 }
 
 void stopMotors() {
@@ -381,8 +383,14 @@ void alignToAngle(float targetAngle, float tolerance = 0.1) {
 
 void navigate() {
   float x = Enes100.getX();
+  Enes100.println(x)
   float y = Enes100.getY();
+  Enes100.println(y)
   float theta = Enes100.getTheta();
+  Enes100.println(theta)
+
+  startMotor()
+  Enes100.println("Motor On")
   
   // Debug output
   Enes100.print("Position: X=");
@@ -511,6 +519,7 @@ float getFrontDistance() {
 
 void setup() {
   Serial.begin(9600);
+  delay(1000)
   Enes100.println("\n\n=== ENES100 WATER MISSION ===");
   Enes100.println("Team: Tidal Terps");
   Enes100.println("Initializing...\n");
