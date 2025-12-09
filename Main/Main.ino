@@ -57,6 +57,42 @@ const int SERVO_PIN = 44;
 const int PUMP_PIN  = 46;
 
 // ===================================================
+// SETUP
+// ===================================================
+
+void setup() {
+  Serial.begin(9600);
+  delay(1000)
+  Enes100.println("\n\n=== ENES100 WATER MISSION ===");
+  Enes100.println("Team: Tidal Terps");
+  Enes100.println("Initializing...\n");
+  
+  // Initialize motors
+  setupMotors();
+  
+  
+  // Initialize Wi-Fi and Vision System
+  Enes100.println("Connecting to Vision System...");
+  Enes100.begin(TEAM_NAME, TEAM_TYPE, MARKER_ID, ROOM_NUMBER,
+                WIFI_TX_PIN, WIFI_RX_PIN);
+  
+  Enes100.println("Connected to Vision System!");
+  Enes100.println("=== SYSTEM ONLINE ===");
+  
+  // Initialize sensors
+  setupColorSensor();
+  setupDepthSensor();
+  pinMode(US_FRONT_TRIG, OUTPUT);
+  pinMode(US_FRONT_ECHO, INPUT);
+  
+  // Initialize sample collection
+  setupSampleCollection();
+  
+  Enes100.println("All systems ready!\n");
+  delay(2000);
+}
+
+// ===================================================
 // MOTOR CONTROL
 // ===================================================
 
@@ -113,11 +149,13 @@ void setMotorSpeed(int m1Speed, int m2Speed, int m3Speed, int m4Speed) {
 void driveForward(int speed) {
   speed = constrain(speed, 0, 255);
   setMotorSpeed(speed, speed, speed, speed);
+  delay(200)
 }
 
 void driveBackward(int speed) {
   speed = constrain(speed, 0, 255);
   setMotorSpeed(-speed, -speed, -speed, -speed);
+  delay(200)
 }
 
 void turnLeft(int speed) {
@@ -511,42 +549,6 @@ float getFrontDistance() {
   long mm = measureDistance(US_FRONT_TRIG, US_FRONT_ECHO);
   if (mm < 0) return -1;
   return mm / 1000.0;  // Convert to meters
-}
-
-// ===================================================
-// SETUP
-// ===================================================
-
-void setup() {
-  Serial.begin(9600);
-  delay(1000)
-  Enes100.println("\n\n=== ENES100 WATER MISSION ===");
-  Enes100.println("Team: Tidal Terps");
-  Enes100.println("Initializing...\n");
-  
-  // Initialize motors
-  setupMotors();
-  
-  
-  // Initialize Wi-Fi and Vision System
-  Enes100.println("Connecting to Vision System...");
-  Enes100.begin(TEAM_NAME, TEAM_TYPE, MARKER_ID, ROOM_NUMBER,
-                WIFI_TX_PIN, WIFI_RX_PIN);
-  
-  Enes100.println("Connected to Vision System!");
-  Enes100.println("=== SYSTEM ONLINE ===");
-  
-  // Initialize sensors
-  setupColorSensor();
-  setupDepthSensor();
-  pinMode(US_FRONT_TRIG, OUTPUT);
-  pinMode(US_FRONT_ECHO, INPUT);
-  
-  // Initialize sample collection
-  setupSampleCollection();
-  
-  Enes100.println("All systems ready!\n");
-  delay(2000);
 }
 
 // ===================================================
